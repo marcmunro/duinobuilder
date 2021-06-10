@@ -1,0 +1,93 @@
+AC_INIT([arduino_makefile], [0.01])
+
+# Use some arg handling from postgres.
+m4_pattern_forbid(^PGAC_)dnl Fail if the needed macros are not defined
+m4_pattern_forbid(^MMAC_)dnl Ditto
+m4_include([m4/general.m4])
+
+# Board.  This determines much of the rest of the configuration.
+# It defaults to uno.  Set this from configure using with-board="xxx"
+#
+AC_MSG_CHECKING([Checking board type])
+PGAC_ARG_REQ(with, board, [BOARD-TAG],
+	     [identify type of board (from boards.txt) [uno]],
+	     [BOARD=${withval}],[BOARD=unprovided])
+AC_SUBST(BOARD)
+AC_MSG_RESULT([${BOARD}])
+
+# Architecture - determined from --host option to configure.
+[ARCHITECTURE=${target_alias}]
+AC_SUBST(ARCHITECTURE)
+
+# Arduino dir.  From here we are going to find boards.txt and from
+# that and our architecture we should be able to determine everything
+# else.
+#
+AC_MSG_CHECKING([Checking arduino installation dir])
+PGAC_ARG_REQ(with, arduinodir, [DIR],
+	     [identify arduino installation dir [/usr/share/arduino]],
+             [ARDUINO_DIR=${withval}],[ARDUINO_DIR=/usr/share/arduino])
+AC_SUBST(ARDUINO_DIR)
+AC_MSG_RESULT([${ARDUINO_DIR}])
+
+# Macro to parse (kinda) boards.txt for various board parameters.
+AC_DEFUN([MMAC_FROM_BOARDS],
+  [$1=`grep "${BOARD}\.$2" "${mm_ac_boards}" | cut -d= -f2-`
+  AC_SUBST($1)])
+
+# This is duplicated from the parent configure script.  Too bad.
+[mm_ac_boards="${ARDUINO_DIR}/hardware/arduino/boards.txt"]
+
+AC_CHECK_FILE([${mm_ac_boards}],,
+  AC_MSG_FAILURE([Unable to find boards.txt (use --with-arduinodir)]))
+
+BOARDS_TXT=${mm_ac_boards}
+AC_SUBST(BOARDS_TXT)
+
+# From boards.txt, determine our device info.
+MMAC_FROM_BOARDS([ARDUINO_CORE],[build.core])
+MMAC_FROM_BOARDS([VARIANT],[build.variant])
+MMAC_FROM_BOARDS([MCU],[build.mcu])
+MMAC_FROM_BOARDS([F_CPU],[build.f_cpu])
+MMAC_FROM_BOARDS([HEX_MAXIMUM_SIZE],[upload.maximum_size])
+MMAC_FROM_BOARDS([AVRDUDE_ARD_PROGRAMMER],[upload.protocol])
+MMAC_FROM_BOARDS([AVR_BAUD],[upload.speed])
+
+VENDOR=arduino
+AC_SUBST(VENDOR)
+
+# From version.txt, determine our version.
+AC_CHECK_FILE(
+  [${ARDUINO_DIR}/lib/version.txt],
+  [changequote({{,}})
+   ARDUINO_VERSION=`sed -e 's/^[0-9]://g' -e 's/[.]//g' -e 's/\+.*//g' <${ARDUINO_DIR}/lib/version.txt | head -c 5`
+  changequote([,])
+  ],
+  [ARDUINO_VERSION=100])
+AC_SUBST(ARDUINO_VERSION)
+
+# Possible other directories to add to PATH for our tools.
+AC_DEFUN([AVR_PATH],
+  [${ARDUINO_DIR}/hardware/tools/${ARCHITECTURE}/bin]dnl
+  [${PATH_SEPARATOR}${HOME}/Arduino/hardware/tools/${ARCHITECTURE}/bin])
+
+# Define extra paths for C headers before we start checking
+ARDUINO_HEADER_DIRS="${ARDUINO_DIR}/hardware/${VENDOR}/cores/${ARDUINO_CORE} \
+        ${ARDUINO_DIR}/hardware/arduino/variants/${VARIANT}"
+mm_ac_header_flags="-I${ARDUINO_DIR}/hardware/${VENDOR}/cores/${ARDUINO_CORE} \
+        -I${ARDUINO_DIR}/hardware/${VENDOR}/variants/${VARIANT}"
+AC_SUBST(ARDUINO_HEADER_DIRS)
+
+[ac_save_CPPFLAGS=${CPPFLAGS}
+ ac_save_CFLAGS=${CFLAGS}
+ CFLAGS="${CFLAGS} ${mm_ac_header_flags}"
+ CPPFLAGS="${CPPFLAGS} ${mm_ac_header_flags}"]
+
+#AC_CHECK_HEADER([Arduino.h],,
+#  AC_MSG_FAILURE([Unable to find Arduino.h]))
+[CFLAGS=${ac_save_CFLAGS}
+ CPPFLAGS=${ac_save_CPPFLAGS}]
+
+
+AC_CONFIG_FILES([Makefile.board])
+AC_OUTPUT

@@ -1,0 +1,31 @@
+
+CXX     = @CXX@
+CC      = @CC@
+AR      = @AR@
+OBJCOPY = @OBJCOPY@
+OBJDUMP = @OBJDUMP@
+SIZE    = @SIZE@
+NM      = @NM@
+AVRDUDE = @AVRDUDE@
+
+ARDUINO_RESET = @ARDUINO_RESET@
+ARDUINO_DIR   = @ARDUINO_DIR@
+BOARDS_TXT    = @BOARDS_TXT@
+AVRDUDE_CONF  = @AVRDUDE_CONF@
+SIZE_FOR_AVR  = @SIZE_FOR_AVR@
+
+ifdef BOARD_DIR
+  # IGNORE_BOARD is defined when we perform a recursive make to show
+  # the available board types.  This prevents the lack of a board type
+  # from causing make to fail.
+  ifndef IGNORE_BOARD
+    include $(BOARD_DIR)/BOARD_TYPE
+    include $(BOARD_DIR)/Makefile.board
+  endif
+
+  # Only include deps this if we have already loaded the definitions
+  # that allow our CFLAGS, etc to be properly defined.
+  ifndef NODEPS
+    -include $(DEPS)
+  endif
+endif 

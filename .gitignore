@@ -1,0 +1,34 @@
+# Ignore backup and temp files
+*~
+\#*#
+\.\#*
+
+# Object files 
+*.o
+
+# Log files
+*.log
+
+# autoconf files
+autom4te.cache
+config.*
+
+# Make-generated dependency files
+*.d
+
+# Generated config and Makefiles
+configure
+configure_board
+Makefile.global
+Makefile.board
+
+# The example board directory
+promini
+
+# Contents of libraries
+libraries/*/
+
+# Contents of tests
+tests/*/
+
+

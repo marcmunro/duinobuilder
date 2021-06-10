@@ -1,0 +1,212 @@
+# Makefile for checking Arduino libraries
+# We can run this makefile in different directories with slightly
+# different, but emminently sane, results.
+# - in a specific unit test directory (subdir of tests)
+#   ==> builds and runs that unit test
+# - in the tests directory
+#   ==> runs all available unit tests
+#   ==> builds and runs all unit tests
+# - in a specific library directory (subdir of libraries)
+#   if there is a matching unit test:
+#     ==> builds and runs the matching unit test
+#   else
+#     ==> just compiles each source file in the library directory
+# - in the libraries
+#   As above, for each subdirectory.
+#
+.PHONY: test_dir
+
+MAKEFILEPATH := $(realpath $(call lastword,$(MAKEFILE_LIST)))
+ROOTDIR = $(realpath $(dir $(MAKEFILEPATH)))
+LIBDIR = $(ROOTDIR)/libraries
+TESTDIR = $(ROOTDIR)/tests
+# Idetify library directories.  These are subdirs of LIBDIR that
+# contain header files.
+USER_LIB_PATHS = $(sort $(realpath $(dir $(wildcard $(LIBDIR)/*/*.h))))
+
+USER_LIBS = $(notdir $(USER_LIB_PATHS))
+TEST_LIBS = $(foreach dir,$(USER_LIBS),$(realpath $(TESTDIR)/$(dir)))
+DIRNAME = $(notdir $(realpath $(CURDIR)))
+
+PARENTDIR = $(realpath $(CURDIR)/..)
+CPP_FILES = $(notdir $(wildcard $(CURDIR)/*.cpp))
+SOURCES = $(CPP_FILES)
+DEPS = $(CPP_FILES:.cpp=.d)
+
+CFLAGS += -g -O0
+CXXFLAGS += -g -O0
+
+INCLUDEFLAGS := -I$(TESTDIR) 
+ifeq ($(CURDIR),$(ROOTDIR))
+  BUILD_TYPE = root_dir
+else
+  ifeq ($(CURDIR),$(TESTDIR))
+    BUILD_TYPE = test_dir
+  else
+    ifeq ($(PARENTDIR),$(TESTDIR))
+      BUILD_TYPE = test_subdir
+      INCLUDEFLAGS += $(foreach dir,$(USER_LIB_PATHS), -I$(dir))
+    else
+      ifeq ($(CURDIR),$(LIBDIR))
+        BUILD_TYPE = lib_dir
+      else
+        ifeq ($(PARENTDIR),$(LIBDIR))
+          BUILD_TYPE = lib_subdir
+          # This will be defined if there is a test directory for the
+          # current library
+          TEST_LIBDIR = $(filter $(notdir $(CURDIR)), $(notdir $(TEST_LIBS)))
+        else
+          BUILD_TYPE = UNKNOWN 
+        endif
+      endif
+    endif
+  endif
+endif
+
+ifdef VERBOSE
+    FEEDBACK = true
+    AT = 
+else
+   FEEDBACK = echo
+   AT = @
+endif
+
+
+all: $(BUILD_TYPE)
+
+lib_dir: $(LIBDIR)/Makefile
+	@for subdir in $(USER_LIBS); do \
+	    (cd $${subdir}; \
+	     $(MAKE) --no-print-directory -f $(MAKEFILEPATH)); done
+	@echo done $@
+
+lib_subdir: 
+	@if [ "x$(TEST_LIBDIR)" = "x" ]; then \
+	  $(FEEDBACK) Compiling $(SOURCES)...; \
+	  $(CXX) $(INCLUDEFLAGS) -c $(SOURCES) || \
+	    (rm -f *.o; exit 2); \
+	  echo Done; \
+	  rm -f *.o; \
+	else \
+	  cd $(TESTDIR)/$(TEST_LIBDIR); \
+	  $(MAKE) --no-print-directory -f $(MAKEFILEPATH); \
+	fi
+
+test_dir: $(TEST_EXECS) $(TESTDIR)/Makefile
+	@for subdir in $(TEST_LIBS); do \
+	    (cd $${subdir}; \
+	     $(MAKE) --no-print-directory -f $(MAKEFILEPATH)); done
+	@echo done $@
+
+test_subdir: test_$(DIRNAME)
+	@echo "\n  Testing $(DIRNAME):"
+	@./test_$(DIRNAME)
+
+# Generate a dependency file for the executable rather than for an
+# object file.
+%.d: %.cpp
+	$(AT)$(CXX) -M $(INCLUDEFLAGS) $< | sed -e 's/\.o:/:/' >$@
+
+# Create a makefile definition for LIB_SOURCES, based on our
+# dependencies.  We assume that every source file in every required
+# library is a required component of our test executable.
+sources.mk: $(DEPS)
+	@grep $(LIBDIR) *.d | sed -e 's!.*/\(.*\)\.h.*!\1!' | \
+	  ( echo LIB_SOURCES =; \
+	    while read lib; do \
+	      ls $(LIBDIR)/$${lib}/*cpp \
+	         $(LIBDIR)/$${lib}/*c 2>/dev/null || true; \
+	    done) | xargs >$@
+
+ifeq ($(BUILD_TYPE),test_subdir)
+  -include sources.mk $(DEPS)
+endif
+
+what:
+	@echo ROOT: x$(ROOTDIR)x
+	@echo CUR: x$(CURDIR)x
+	@echo BUILD_TYPE: $(BUILD_TYPE)
+	@echo DEPS: $(DEPS)
+
+docs:
+	cd $(ROOTDIR); make --no-print-directory -f Makefile doxy.tag
+
+
+# Build and run test executable
+test_$(DIRNAME): sources.mk $(TESTDIR)/$(DIRNAME)/Makefile $(LIB_SOURCES)
+	@$(FEEDBACK) Creating $@...
+	$(AT)g++ $(CXXFLAGS) $(INCLUDEFLAGS) $(SOURCES) $(LIB_SOURCES) -o $@
+
+# Return each subdirectory ignoring dirs beginning with ., m4 and
+# autom4te.cache
+EACHDIR = `find . -maxdepth 1 -type d | grep -v '^\.$$' | \
+	      grep -v '/\.' | grep -v '^./\(autom4\|m4\)'`
+
+# Create local makefiles in tests and libraries directories
+makefiles: makefiles_$(BUILD_TYPE)
+	@true
+
+makefiles_root_dir:
+	@for i in $(EACHDIR); do \
+	    (cd $$i && \
+	    $(MAKE) --no-print-directory -f $(MAKEFILEPATH) makefiles) ; \
+	done
+
+makefiles_UNKNOWN:
+	@true # Nothng to be done here
+
+makefiles_test_dir: $(CURDIR)/Makefile
+	@for i in $(EACHDIR); do \
+	    (cd $$i && \
+	    $(MAKE) --no-print-directory -f $(MAKEFILEPATH) makefiles) ; \
+	done
+
+makefiles_test_subdir makefiles_lib_subdir: $(CURDIR)/Makefile
+
+makefiles_lib_dir: $(CURDIR)/Makefile
+	@for i in $(EACHDIR); do \
+	    (cd $$i && \
+	    $(MAKE) --no-print-directory -f $(MAKEFILEPATH) makefiles) ; \
+	done
+
+# Create a template makefile here.
+$(CURDIR)/Makefile:
+	@echo Creating $@...
+	@echo "include $(ROOTDIR)/Makefile.test" >$@
+
+garbage += \\\#*  .\\\#*  *~  *.o *.d *.mk
+
+clean: clean_$(BUILD_TYPE)
+
+clean_lib_dir clean_test_dir:
+	@echo Cleaning `pwd`...
+	@rm -rf $(garbage) 
+	@for i in $(EACHDIR); do \
+	    ( cd $$i && \
+	    $(MAKE) --no-print-directory -f $(MAKEFILEPATH) clean CLEANING=y) ; \
+	done
+
+# This removes Makefiles as we don't want them polluting the library
+# in case we want to distribute it.
+clean_lib_subdir:
+	@echo Cleaning `pwd`...
+	@rm -rf $(garbage) Makefile
+
+# Delete the test executable as well as any garbage
+clean_test_subdir:
+	@echo Cleaning `pwd`...
+	@rm -rf $(garbage) test_$(notdir $(CURDIR))
+
+distclean: distclean_$(BUILD_TYPE)
+
+distclean_test_dir distclean_lib_dir: distclean_this
+	@for i in $(EACHDIR); do \
+	    ( cd $$i; \
+	    $(MAKE) --no-print-directory -f $(MAKEFILEPATH) distclean CLEANING=y) ; \
+	done
+
+distclean_test_subdir distclean_lib_subdir: distclean_this
+
+distclean_this:
+	@echo Steam cleaning `pwd`...
+	@rm -rf $(garbage) Makefile test_$(notdir $(CURDIR))
